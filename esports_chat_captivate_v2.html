@@ -1,0 +1,521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Class Chat Moderation</title>
+<style>
+  /* ── Reset & base ── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: linear-gradient(165deg, #070b14 0%, #0d1526 50%, #0a1020 100%);
+    /* Captivate-safe system font stack — no external request */
+    font-family: 'Segoe UI', Arial, sans-serif;
+    color: #e0e8f0;
+    font-size: 13px;
+  }
+
+  /* ── Scrollbars ── */
+  ::-webkit-scrollbar { width: 5px; }
+  ::-webkit-scrollbar-track { background: #0a0e1a; }
+  ::-webkit-scrollbar-thumb { background: #2a3a5c; border-radius: 3px; }
+
+  /* ── Layout ── */
+  #app { display: flex; flex-direction: column; width: 100%; height: 100%; position: relative; }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 9px 14px; flex-shrink: 0;
+    border-bottom: 1px solid #1a2744;
+    background: linear-gradient(90deg, rgba(7,11,20,.97), rgba(13,21,38,.97));
+  }
+
+  #statsBar {
+    display: flex; gap: 22px; padding: 5px 14px; flex-shrink: 0;
+    border-bottom: 1px solid #1a2744;
+    background: rgba(74,106,154,.08);
+    overflow-x: auto; white-space: nowrap;
+    font-size: 11px; font-weight: 600; letter-spacing: .03em;
+  }
+
+  #body { display: flex; flex: 1; overflow: hidden; }
+
+  #chatCol { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+  #chatMessages {
+    flex: 1; overflow-y: auto;
+    padding: 10px 14px;
+    display: flex; flex-direction: column; gap: 5px;
+  }
+
+  #hintBar {
+    padding: 7px 14px; flex-shrink: 0;
+    border-top: 1px solid #1a2744;
+    background: rgba(26,39,68,.3);
+    font-size: 11px; color: #7a9cc6; text-align: center;
+  }
+
+  #modLog {
+    padding: 5px 14px; flex-shrink: 0;
+    border-top: 1px solid #1a2744;
+    background: rgba(26,39,68,.3);
+    max-height: 72px; overflow-y: auto;
+    font-size: 10px; color: #7a9cc6; line-height: 1.6;
+  }
+
+  /* Members sidebar */
+  #sidebar {
+    display: none; width: 170px; flex-shrink: 0;
+    border-left: 1px solid #1a2744;
+    background: rgba(7,11,20,.75);
+    padding: 10px; overflow-y: auto;
+  }
+  #sidebar h3 {
+    font-size: 12px; font-weight: 700; color: #00ff87;
+    margin-bottom: 8px; text-transform: uppercase; letter-spacing: .05em;
+  }
+  .member-row {
+    display: flex; align-items: center; gap: 7px;
+    padding: 5px 6px; border-radius: 6px;
+    background: rgba(26,39,68,.35); margin-bottom: 4px;
+  }
+  .member-avatar {
+    width: 24px; height: 24px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; flex-shrink: 0;
+  }
+  .member-name { font-size: 11px; font-weight: 600; }
+  .member-rank { font-size: 9px; color: #7a9cc6; }
+
+  /* Toast — absolute, NOT fixed */
+  #toastWrap {
+    position: absolute; top: 10px; right: 10px;
+    display: flex; flex-direction: column; gap: 5px;
+    pointer-events: none; z-index: 99;
+  }
+  .toast {
+    padding: 7px 13px; border-radius: 7px;
+    font-size: 12px; font-weight: 600;
+    animation: toastIn .25s ease-out;
+    transition: opacity .3s ease;
+  }
+  @keyframes toastIn {
+    from { opacity: 0; transform: translateY(-5px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+
+  /* Message bubble */
+  .msg {
+    padding: 9px 11px; border-radius: 7px;
+    border: 1.5px solid transparent;
+    animation: slideIn .3s ease-out;
+  }
+  .msg.flagged { animation: flagFlash 1.5s ease-in-out, slideIn .3s ease-out; border-color: #ff6b6b; }
+  .msg-meta { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; margin-bottom: 3px; }
+  .msg-ts  { font-size: 10px; color: #4a6a9a; font-family: monospace; }
+  .msg-name { font-size: 13px; font-weight: 700; }
+  .msg-level {
+    font-size: 10px; font-weight: 600;
+    padding: 1px 5px; border-radius: 4px;
+  }
+  .msg-flag {
+    font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px;
+    background: rgba(255,107,107,.2); color: #ff6b6b;
+  }
+  .msg-text { font-size: 13px; color: #c8d6e5; line-height: 1.45; }
+  .msg-actions { display: flex; gap: 5px; margin-top: 7px; flex-wrap: wrap; }
+  .msg-actioned { font-size: 10px; font-weight: 600; color: #7a9cc6; margin-top: 5px; }
+
+  /* Action buttons */
+  .abtn {
+    padding: 4px 9px; border-radius: 5px; border: none;
+    font-size: 10px; font-weight: 700; cursor: pointer;
+    transition: transform .15s ease; letter-spacing: .02em;
+  }
+  .abtn:hover  { transform: scale(1.06); }
+  .abtn:active { transform: scale(0.95); }
+
+  /* Header elements */
+  .logo-box {
+    width: 34px; height: 34px; border-radius: 7px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, #00ff87, #00c9ff);
+  }
+  .logo-box svg { width: 18px; height: 18px; stroke: #070b14; stroke-width: 2.5; fill: none; }
+
+  .flag-badge {
+    display: flex; align-items: center; gap: 5px;
+    padding: 3px 9px; border-radius: 999px; font-size: 11px;
+    background: rgba(74,106,154,.2); color: #7a9cc6;
+  }
+  .flag-badge svg { width: 12px; height: 12px; stroke: currentColor; stroke-width: 2; fill: none; }
+
+  #toggleBtn {
+    padding: 5px; border-radius: 7px; border: none; cursor: pointer;
+    background: rgba(0,255,135,.1); color: #00ff87;
+    display: flex; align-items: center;
+  }
+  #toggleBtn svg { width: 17px; height: 17px; stroke: currentColor; stroke-width: 2; fill: none; }
+
+  /* Avatar */
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+  }
+
+  /* Animations */
+  @keyframes slideIn {
+    from { opacity: 0; transform: translateY(9px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes flagFlash {
+    0%,100% { background: rgba(255,107,107,.07); }
+    50%      { background: rgba(255,107,107,.17); }
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- Header -->
+  <header>
+    <div style="display:flex;align-items:center;gap:11px;">
+      <div class="logo-box">
+        <!-- Zap icon — inline SVG, no CDN needed -->
+        <svg viewBox="0 0 24 24"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+      </div>
+      <div>
+        <div style="font-size:17px;font-weight:700;color:#00ff87;letter-spacing:.04em;text-transform:uppercase;">Class Chat</div>
+        <div style="font-size:10px;color:#4a6a9a;">Monitor and moderate classroom discussion</div>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:9px;">
+      <div class="flag-badge">
+        <!-- Alert-circle icon -->
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span id="flagCount">0</span>&nbsp;Flagged
+      </div>
+      <button id="toggleBtn" title="Toggle members">
+        <!-- Users icon -->
+        <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <!-- Stats bar -->
+  <div id="statsBar">
+    <span style="color:#4a6a9a;">Warnings:&nbsp;<span id="warnStat" style="color:#ffd740;">0</span></span>
+    <span style="color:#4a6a9a;">Mutes:&nbsp;<span id="muteStat" style="color:#00c9ff;">0</span></span>
+    <span style="color:#4a6a9a;">Removals:&nbsp;<span id="removeStat" style="color:#ff5252;">0</span></span>
+    <span style="color:#4a6a9a;">Escalations:&nbsp;<span id="escalateStat" style="color:#ea80fc;">0</span></span>
+  </div>
+
+  <!-- Body -->
+  <div id="body">
+    <div id="chatCol">
+      <div id="chatMessages"></div>
+      <div id="hintBar">Use the action buttons on flagged messages to moderate</div>
+      <div id="modLog"></div>
+    </div>
+    <div id="sidebar">
+      <h3>Members</h3>
+      <div id="membersList"></div>
+    </div>
+  </div>
+
+  <!-- Toast container — absolute, not fixed -->
+  <div id="toastWrap"></div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ── Roster ── */
+  var roster = [
+    { name:'PhantomAce', color:'#b388ff', rank:'Captain',  level:'Advanced'     },
+    { name:'xNova',      color:'#00c9ff', rank:'Mid Lane', level:'Advanced'     },
+    { name:'BlitzKrieg', color:'#ffd740', rank:'ADC',      level:'Intermediate' },
+    { name:'ShadowFx',   color:'#ff5252', rank:'Top Lane', level:'Intermediate' },
+    { name:'IceWarden',  color:'#69f0ae', rank:'Support',  level:'Beginner'     },
+    { name:'VoidWalker', color:'#ea80fc', rank:'Jungle',   level:'Advanced'     },
+  ];
+
+  /* ── State ── */
+  var stats       = { warnings:0, mutes:0, removals:0, escalations:0 };
+  var messages    = [];
+  var flaggedList = [];
+  var tids        = [];
+  var logLines    = [];
+  var now         = 0;
+
+  /* ── Timelines ── */
+  var base = [
+    { t:  500, user:'PhantomAce', color:'#b388ff', level:'Advanced',     text:'alright team lets get warmed up. scrims in 5 mins', flagged:false },
+    { t: 1500, user:'xNova',      color:'#00c9ff', level:'Advanced',     text:'im ready. mid lane again?', flagged:false },
+    { t: 2800, user:'BlitzKrieg', color:'#ffd740', level:'Intermediate', text:'lol xNova you got carried so hard last tournament', flagged:false },
+    { t: 4200, user:'ShadowFx',   color:'#ff5252', level:'Intermediate', text:'nah xnova is actually trash fr fr', flagged:true,  sev:'medium' },
+    { t: 5600, user:'IceWarden',  color:'#69f0ae', level:'Beginner',     text:'dude come on we need to focus', flagged:true, sev:'high' },
+    { t: 7000, user:'VoidWalker', color:'#ea80fc', level:'Advanced',     text:'Can we keep it professional? We have districts next month', flagged:false },
+    { t: 8500, user:'PhantomAce', color:'#b388ff', level:'Advanced',     text:"yeah just some banter, we're cool", flagged:false },
+    { t:10000, user:'xNova',      color:'#00c9ff', level:'Advanced',     text:'loading in now. lets go', flagged:false },
+    { t:11500, user:'BlitzKrieg', color:'#ffd740', level:'Intermediate', text:'ok im in', flagged:false },
+    { t:13000, user:'ShadowFx',   color:'#ff5252', level:'Intermediate', text:"blitz you're gonna int this so hard watch", flagged:true, sev:'low' },
+    { t:14500, user:'IceWarden',  color:'#69f0ae', level:'Beginner',     text:'yeah blitz your mechanics are actually terrible', flagged:true, sev:'medium' },
+    { t:16000, user:'BlitzKrieg', color:'#ffd740', level:'Intermediate', text:"man what? i'm climbing faster than you", flagged:false },
+    { t:17500, user:'VoidWalker', color:'#ea80fc', level:'Advanced',     text:"shadow ice chill out. we're supposed to be a team", flagged:false },
+    { t:19000, user:'ShadowFx',   color:'#ff5252', level:'Intermediate', text:'not your captain voidwalker back off', flagged:true, sev:'medium' },
+  ];
+
+  var warnPath = [
+    { t:1500, user:'ShadowFx',   color:'#ff5252', level:'Intermediate', text:'ok fair. my bad everyone', flagged:false },
+    { t:3000, user:'VoidWalker', color:'#ea80fc', level:'Advanced',     text:"thanks coach. let's keep it focused", flagged:false },
+    { t:4500, user:'IceWarden',  color:'#69f0ae', level:'Beginner',     text:'yeah we are good. just nerves before scrims', flagged:false },
+    { t:6000, user:'PhantomAce', color:'#b388ff', level:'Advanced',     text:"alright team let's lock in. enemies are good", flagged:false },
+    { t:7500, user:'BlitzKrieg', color:'#ffd740', level:'Intermediate', text:'ready when you are captain', flagged:false },
+    { t:9000, user:'xNova',      color:'#00c9ff', level:'Advanced',     text:"nice reset. let's have a good scrim", flagged:false },
+  ];
+
+  var mutePath = [
+    { t:1500, user:'IceWarden',  color:'#69f0ae', level:'Beginner',     text:"wait why is shadow's chat muted?", flagged:false },
+    { t:3000, user:'VoidWalker', color:'#ea80fc', level:'Advanced',     text:'coach muted him. that toxicity needed to stop', flagged:false },
+    { t:4500, user:'BlitzKrieg', color:'#ffd740', level:'Intermediate', text:'finally. maybe we can actually focus now', flagged:false },
+    { t:6000, user:'PhantomAce', color:'#b388ff', level:'Advanced',     text:"alright team let's use this to practice properly", flagged:false },
+    { t:7500, user:'xNova',      color:'#00c9ff', level:'Advanced',     text:"way better energy already. let's go", flagged:false },
+    { t:9000, user:'VoidWalker', color:'#ea80fc', level:'Advanced',     text:'we play better when we are supportive anyway', flagged:false },
+  ];
+
+  var removePath = [
+    { t:1500, user:'PhantomAce', color:'#b388ff', level:'Advanced',     text:'coach removed that message. come on shadow', flagged:false },
+    { t:3000, user:'IceWarden',  color:'#69f0ae', level:'Beginner',     text:'yeah that crossed the line', flagged:false },
+    { t:4500, user:'VoidWalker', color:'#ea80fc', level:'Advanced',     text:'shadow you good? we need you focused', flagged:false },
+    { t:6000, user:'BlitzKrieg', color:'#ffd740', level:'Intermediate', text:"let's keep it clean guys", flagged:false },
+    { t:7500, user:'xNova',      color:'#00c9ff', level:'Advanced',     text:'scrims are in 2 mins. reset your heads', flagged:false },
+  ];
+
+  var escalatePath = [
+    { t: 1500, user:'IceWarden',  color:'#69f0ae', level:'Beginner',     text:'shadow ice you guys need to chill', flagged:false },
+    { t: 3000, user:'ShadowFx',   color:'#ff5252', level:'Intermediate', text:'staying out of this voidwalker', flagged:true, sev:'high' },
+    { t: 4500, user:'xNova',      color:'#00c9ff', level:'Advanced',     text:'this energy is killing our prep', flagged:false },
+    { t: 6000, user:'IceWarden',  color:'#69f0ae', level:'Beginner',     text:"blitz throw this and we're done with you", flagged:true, sev:'high' },
+    { t: 7500, user:'BlitzKrieg', color:'#ffd740', level:'Intermediate', text:"that's it. i'm not playing with you two", flagged:false },
+    { t: 9000, user:'ShadowFx',   color:'#ff5252', level:'Intermediate', text:'go ahead. we have subs', flagged:true, sev:'high' },
+    { t:10500, user:'VoidWalker', color:'#ea80fc', level:'Advanced',     text:'THIS IS BULLYING. Where is coaching staff??', flagged:false },
+    { t:12000, user:'PhantomAce', color:'#b388ff', level:'Advanced',     text:'admin where are you. team is falling apart', flagged:false },
+    { t:13500, user:'xNova',      color:'#00c9ff', level:'Advanced',     text:"i'm out of this scrim", flagged:false },
+  ];
+
+  /* ── Utilities ── */
+  function pad(n) { return n < 10 ? '0' + n : '' + n; }
+  function fmt(ms) {
+    var s = Math.floor(ms / 1000);
+    return pad(Math.floor(s / 60)) + ':' + pad(s % 60);
+  }
+  function esc(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function hex2rgba(hex, a) {
+    var r = parseInt(hex.slice(1,3),16);
+    var g = parseInt(hex.slice(3,5),16);
+    var b = parseInt(hex.slice(5,7),16);
+    return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+  }
+
+  /* ── Toast ── */
+  function toast(msg, type) {
+    var wrap = document.getElementById('toastWrap');
+    var el = document.createElement('div');
+    el.className = 'toast';
+    var bg = { info:'rgba(0,201,255,.18)', warning:'rgba(255,215,64,.18)', error:'rgba(255,82,82,.18)', success:'rgba(0,255,135,.18)' };
+    var fg = { info:'#00c9ff', warning:'#ffd740', error:'#ff5252', success:'#00ff87' };
+    el.style.background = bg[type] || bg.info;
+    el.style.color      = fg[type] || fg.info;
+    el.textContent = msg;
+    wrap.appendChild(el);
+    setTimeout(function () {
+      el.style.opacity = '0';
+      setTimeout(function () { try { wrap.removeChild(el); } catch(e) {} }, 320);
+    }, 3000);
+  }
+
+  /* ── Mod log ── */
+  function log(action, user, sev) {
+    var line = '[' + fmt(now) + '] ' + action + ': ' + user + (sev ? ' (' + sev + ')' : '');
+    logLines.unshift(line);
+    if (logLines.length > 5) logLines.pop();
+    document.getElementById('modLog').innerHTML =
+      logLines.map(function(l){ return '<div>' + esc(l) + '</div>'; }).join('');
+  }
+
+  /* ── Stats ── */
+  function updateStats() {
+    document.getElementById('warnStat').textContent     = stats.warnings;
+    document.getElementById('muteStat').textContent     = stats.mutes;
+    document.getElementById('removeStat').textContent   = stats.removals;
+    document.getElementById('escalateStat').textContent = stats.escalations;
+  }
+
+  /* ── Render messages ── */
+  function render() {
+    var c = document.getElementById('chatMessages');
+    c.innerHTML = '';
+
+    messages.forEach(function (msg, i) {
+      var div = document.createElement('div');
+      div.className = 'msg' + (msg.flagged ? ' flagged' : '');
+
+      /* Action buttons HTML */
+      var btns = '';
+      if (msg.flagged && !msg.actioned) {
+        btns = '<div class="msg-actions">'
+          + makeBtn(i, 'warn',     'rgba(255,215,64,.18)',  '#ffd740', 'Warn')
+          + makeBtn(i, 'mute',     'rgba(0,201,255,.18)',   '#00c9ff', 'Mute')
+          + makeBtn(i, 'remove',   'rgba(255,82,82,.18)',   '#ff5252', 'Remove')
+          + makeBtn(i, 'escalate', 'rgba(234,128,252,.18)', '#ea80fc', 'Escalate')
+          + '</div>';
+      } else if (msg.flagged && msg.actioned) {
+        var done = { warn:'Warned', mute:'Muted', remove:'Removed', escalate:'Escalated' };
+        btns = '<div class="msg-actioned">' + done[msg.action] + '</div>';
+      }
+
+      var flagBadge = msg.flagged
+        ? '<span class="msg-flag">FLAGGED</span>'
+        : '';
+
+      div.innerHTML =
+        '<div style="display:flex;gap:9px;align-items:flex-start;">'
+          + '<div class="avatar" style="background:' + hex2rgba(msg.color,.13) + ';color:' + msg.color + ';border:1.5px solid ' + hex2rgba(msg.color,.3) + ';">' + esc(msg.user[0]) + '</div>'
+          + '<div style="flex:1;min-width:0;">'
+            + '<div class="msg-meta">'
+              + '<span class="msg-ts">' + fmt(msg.timestamp) + '</span>'
+              + '<span class="msg-name" style="color:' + msg.color + ';">' + esc(msg.user) + '</span>'
+              + '<span class="msg-level" style="background:' + hex2rgba(msg.color,.13) + ';color:' + msg.color + ';">' + esc(msg.level) + '</span>'
+              + flagBadge
+            + '</div>'
+            + '<div class="msg-text">' + esc(msg.text) + '</div>'
+            + btns
+          + '</div>'
+        + '</div>';
+
+      c.appendChild(div);
+    });
+
+    /* Hover effect for non-flagged messages */
+    var divs = c.querySelectorAll('.msg:not(.flagged)');
+    for (var i = 0; i < divs.length; i++) {
+      (function(d){
+        d.addEventListener('mouseenter', function(){ d.style.background = 'rgba(26,39,68,.3)'; });
+        d.addEventListener('mouseleave', function(){ d.style.background = ''; });
+      })(divs[i]);
+    }
+
+    document.getElementById('flagCount').textContent =
+      flaggedList.filter(function(m){ return !m.actioned; }).length;
+
+    c.scrollTop = c.scrollHeight;
+  }
+
+  function makeBtn(i, action, bg, color, label) {
+    return '<button class="abtn" onclick="handleAction(' + i + ',\'' + action + '\')" '
+      + 'style="background:' + bg + ';color:' + color + ';">' + label + '</button>';
+  }
+
+  /* ── Add message ── */
+  function addMsg(obj) {
+    var m = {};
+    for (var k in obj) { m[k] = obj[k]; }
+    m.actioned  = false;
+    m.timestamp = now;
+    messages.push(m);
+    if (obj.flagged) flaggedList.push(m);
+    render();
+  }
+
+  /* ── Scheduler ── */
+  function schedule(delay, obj) {
+    var id = setTimeout(function () {
+      now = delay;
+      addMsg(obj);
+    }, delay);
+    tids.push(id);
+  }
+
+  function clearAndRun(path) {
+    for (var i = 0; i < tids.length; i++) clearTimeout(tids[i]);
+    tids = [];
+    for (var j = 0; j < path.length; j++) {
+      schedule(now + path[j].t, path[j]);
+    }
+  }
+
+  /* ── Public action handler ── */
+  window.handleAction = function (idx, action) {
+    var msg    = messages[idx];
+    msg.actioned = true;
+    msg.action   = action;
+
+    var keyMap = { warn:'warnings', mute:'mutes', remove:'removals', escalate:'escalations' };
+    stats[keyMap[action]]++;
+
+    var labelMap = { warn:'Warned', mute:'Muted', remove:'Removed', escalate:'Escalated' };
+    log(labelMap[action], msg.user, msg.sev);
+    updateStats();
+    render();
+
+    var toastMsg = {
+      warn:     msg.user + ' has been warned',
+      mute:     msg.user + ' has been muted for 2 minutes',
+      remove:   msg.user + "'s message removed",
+      escalate: msg.user + ' escalated to admin'
+    };
+    var toastType = { warn:'info', mute:'info', remove:'error', escalate:'warning' };
+    toast(toastMsg[action], toastType[action]);
+
+    if      (action === 'warn')     clearAndRun(warnPath);
+    else if (action === 'mute')     clearAndRun(mutePath);
+    else if (action === 'remove')   clearAndRun(removePath);
+    else if (action === 'escalate') clearAndRun(escalatePath);
+  };
+
+  /* ── Members sidebar ── */
+  function renderMembers() {
+    var list = document.getElementById('membersList');
+    list.innerHTML = '';
+    roster.forEach(function (s) {
+      var d = document.createElement('div');
+      d.className = 'member-row';
+      d.innerHTML =
+        '<div class="member-avatar" style="background:' + hex2rgba(s.color,.13) + ';color:' + s.color + ';">' + s.name[0] + '</div>'
+        + '<div>'
+          + '<div class="member-name" style="color:' + s.color + ';">' + esc(s.name) + '</div>'
+          + '<div class="member-rank">' + esc(s.rank) + '</div>'
+        + '</div>';
+      list.appendChild(d);
+    });
+  }
+
+  document.getElementById('toggleBtn').addEventListener('click', function () {
+    var sb = document.getElementById('sidebar');
+    sb.style.display = sb.style.display === 'none' ? 'block' : 'none';
+  });
+
+  /* ── Start ── */
+  function start() {
+    now = 0;
+    for (var i = 0; i < base.length; i++) schedule(base[i].t, base[i]);
+    var fallback = setTimeout(function () {
+      if (stats.warnings === 0 && stats.mutes === 0) clearAndRun(escalatePath);
+    }, 20000);
+    tids.push(fallback);
+  }
+
+  renderMembers();
+  start();
+
+})();
+</script>
+</body>
+</html>
